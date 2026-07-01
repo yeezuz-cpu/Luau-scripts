@@ -1,0 +1,144 @@
+--Features: Auto blow bubble , auto sell which isnt reliable i got too lazy trying to fix it or find a better way
+
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+local Window = Library:CreateWindow({
+    Title = 'tung ware bubble',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8
+})
+local Tabs = {
+    Farming = Window:AddTab('Farming'),
+    ['UI Settings'] = Window:AddTab('UI Settings'),
+}
+local LeftFarm = Tabs.Farming:AddLeftGroupbox('Automation')
+local Config = {
+    AutoBubble = false,
+    AutoSell = false,
+    BubbleDelay = 0.1
+}
+LeftFarm:AddToggle('AutoBubble', {
+    Text = 'Auto Blow Bubble',
+    Default = false
+})
+LeftFarm:AddSlider('BubbleDelay', {
+    Text = 'Blow Delay (seconds)',
+    Default = 0.1,
+    Min = 0.01,
+    Max = 1.0,
+    Rounding = 2
+})
+LeftFarm:AddToggle('AutoSell', {
+    Text = 'Auto Sell Bubble',
+    Default = false
+})
+local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
+MenuGroup:AddButton('Unload', function() Library:Unload() end)
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'RightShift', NoUI = true, Text = 'Menu keybind' })
+Library.ToggleKeybind = Options.MenuKeybind
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind' })
+ThemeManager:SetFolder('nrvm_bubble')
+SaveManager:SetFolder('nrvm_bubble/configs')
+SaveManager:BuildConfigSection(Tabs['UI Settings'])
+ThemeManager:ApplyToTab(Tabs['UI Settings'])
+SaveManager:LoadAutoloadConfig()
+Toggles.AutoBubble:OnChanged(function() Config.AutoBubble = Toggles.AutoBubble.Value end)
+Options.BubbleDelay:OnChanged(function() Config.BubbleDelay = Options.BubbleDelay.Value end)
+Toggles.AutoSell:OnChanged(function() Config.AutoSell = Toggles.AutoSell.Value end)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local Remote = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Framework"):WaitForChild("Network"):WaitForChild("Remote"))
+local LocalData = require(game:GetService("ReplicatedStorage"):WaitForChild("Client"):WaitForChild("Framework"):WaitForChild("Services"):WaitForChild("LocalData"))
+local StatsUtil = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Utils"):WaitForChild("Stats"):WaitForChild("StatsUtil"))
+Library:SetWatermarkVisibility(true)
+Library:SetWatermark("tung ware bubble")
+Library:OnUnload(function()
+    Library.Unloaded = true
+end)
+local function getActiveWorldSellPart()
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    local closestPart = nil
+    local shortestDist = math.huge
+    
+    local worldsFolder = Workspace:FindFirstChild("Worlds")
+    if worldsFolder then
+        for _, world in ipairs(worldsFolder:GetChildren()) do
+            local sellModel = world:FindFirstChild("Sell")
+            if sellModel then
+                local rootPart = sellModel:FindFirstChild("Root")
+                if rootPart and rootPart:IsA("BasePart") then
+                    local dist = (hrp.Position - rootPart.Position).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        closestPart = rootPart
+                    end
+                end
+            end
+        end
+    end
+    return closestPart
+end
+task.spawn(function()
+    while true do
+        if Library.Unloaded then break end
+        
+        if Config.AutoBubble then
+            pcall(function()
+                Remote:FireServer("BlowBubble")
+            end)
+        end
+        
+        task.wait(Config.BubbleDelay)
+    end
+end)
+task.spawn(function()
+    while true do
+        if Library.Unloaded then break end
+        
+        if Config.AutoSell then
+            local data = nil
+            pcall(function()
+                data = LocalData:Get()
+            end)
+            
+            if data and data.Bubble then
+                local currentAmount = tonumber(data.Bubble.Amount) or 0
+                local maxStorage = 0
+                pcall(function()
+                    maxStorage = StatsUtil:GetBubbleStorage(data)
+                end)
+                
+                if currentAmount >= maxStorage and maxStorage > 0 then
+                    local sellPart = getActiveWorldSellPart()
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    
+                    if sellPart and hrp then
+                        local previousCFrame = hrp.CFrame
+                        
+                        
+                        hrp.CFrame = sellPart.CFrame + Vector3.new(0, 3, 0)
+                        task.wait()
+                        pcall(function()
+                            Remote:FireServer("SellBubble")
+                        end)
+                        task.wait()
+                        hrp.CFrame = previousCFrame
+                    end
+                end
+            end
+        end
+        
+        task.wait(0.3)
+    end
+end)
