@@ -1,0 +1,504 @@
+--Features: Sherrif Silent aim , Murder/Sherrif Esp , Dropped gun Visual
+
+local repo = 'https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/'
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+local Window = Library:CreateWindow({
+    Title = 'nrvm mm2 private',
+    Center = true,
+    AutoShow = true,
+    TabPadding = 8
+})
+local Tabs = {
+    Combat = Window:AddTab('Combat'),
+    Visuals = Window:AddTab('Visuals'),
+    ['UI Settings'] = Window:AddTab('UI Settings'),
+}
+local LeftCombat = Tabs.Combat:AddLeftGroupbox('Sheriff Aim')
+local LeftVisuals = Tabs.Visuals:AddLeftGroupbox('ESP Settings')
+local RightVisuals = Tabs.Visuals:AddRightGroupbox('Item Watcher')
+local Config = {
+    SilentAim_Enabled = false,
+    Aimbot_FOV = 150,
+    Draw_FOV = false,
+    Max_Distance = 2000,
+    
+    RoleESP_Enabled = false,
+    Skeleton_Enabled = false,
+    Box_Enabled = false,
+    Chams_Enabled = false,
+    GunWatcher_Enabled = false,
+    
+    FOVColor = Color3.fromRGB(255, 255, 255),
+    MurdererColor = Color3.fromRGB(255, 0, 85),
+    SheriffColor = Color3.fromRGB(0, 150, 255),
+    InnocentColor = Color3.fromRGB(0, 255, 140),
+    GunColor = Color3.fromRGB(255, 230, 0),
+}
+LeftCombat:AddToggle('SilentAim_Enabled', {
+    Text = 'Sheriff Silent Aim (Locks Murderer)',
+    Default = false
+})
+LeftCombat:AddToggle('Draw_FOV', {
+    Text = 'Show FOV Circle',
+    Default = false
+}):AddColorPicker('FOVColorPicker', {
+    Default = Color3.fromRGB(255, 255, 255),
+    Title = 'FOV Circle Color'
+})
+LeftCombat:AddSlider('Aimbot_FOV', {
+    Text = 'Aimbot FOV',
+    Default = 150,
+    Min = 50,
+    Max = 500,
+    Rounding = 0
+})
+LeftVisuals:AddToggle('RoleESP_Enabled', {
+    Text = 'Enable Role ESP Colors',
+    Default = false
+})
+LeftVisuals:AddToggle('Skeleton_Enabled', {
+    Text = 'Show Skeletons',
+    Default = false
+})
+LeftVisuals:AddToggle('Box_Enabled', {
+    Text = 'Show Boxes',
+    Default = false
+})
+LeftVisuals:AddToggle('Chams_Enabled', {
+    Text = 'Show Chams',
+    Default = false
+})
+RightVisuals:AddToggle('GunWatcher_Enabled', {
+    Text = 'Show Dropped Gun ESP',
+    Default = false
+}):AddColorPicker('GunColorPicker', {
+    Default = Color3.fromRGB(255, 230, 0),
+    Title = 'Dropped Gun Color'
+})
+local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu')
+MenuGroup:AddButton('Unload', function() Library:Unload() end)
+MenuGroup:AddLabel('Menu bind'):AddKeyPicker('MenuKeybind', { Default = 'RightShift', NoUI = true, Text = 'Menu keybind' })
+Library.ToggleKeybind = Options.MenuKeybind
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ 'MenuKeybind' })
+ThemeManager:SetFolder('nrvm_mm2')
+SaveManager:SetFolder('nrvm_mm2/configs')
+SaveManager:BuildConfigSection(Tabs['UI Settings'])
+ThemeManager:ApplyToTab(Tabs['UI Settings'])
+SaveManager:LoadAutoloadConfig()
+Toggles.SilentAim_Enabled:OnChanged(function() Config.SilentAim_Enabled = Toggles.SilentAim_Enabled.Value end)
+Toggles.Draw_FOV:OnChanged(function() Config.Draw_FOV = Toggles.Draw_FOV.Value end)
+Options.Aimbot_FOV:OnChanged(function() Config.Aimbot_FOV = Options.Aimbot_FOV.Value end)
+Toggles.RoleESP_Enabled:OnChanged(function() Config.RoleESP_Enabled = Toggles.RoleESP_Enabled.Value end)
+Toggles.Skeleton_Enabled:OnChanged(function() Config.Skeleton_Enabled = Toggles.Skeleton_Enabled.Value end)
+Toggles.Box_Enabled:OnChanged(function() Config.Box_Enabled = Toggles.Box_Enabled.Value end)
+Toggles.Chams_Enabled:OnChanged(function() Config.Chams_Enabled = Toggles.Chams_Enabled.Value end)
+Toggles.GunWatcher_Enabled:OnChanged(function() Config.GunWatcher_Enabled = Toggles.GunWatcher_Enabled.Value end)
+Options.FOVColorPicker:OnChanged(function() Config.FOVColor = Options.FOVColorPicker.Value end)
+Options.GunColorPicker:OnChanged(function() Config.GunColor = Options.GunColorPicker.Value end)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local targetList = {}
+local lineCache = {}
+local boxCache = {}
+local gunVisuals = {}
+local fovIndicator = nil
+if Drawing then
+    fovIndicator = Drawing.new("Circle")
+    fovIndicator.Thickness = 1
+    fovIndicator.NumSides = 32
+    fovIndicator.Radius = Config.Aimbot_FOV
+    fovIndicator.Filled = false
+    fovIndicator.Color = Config.FOVColor
+    fovIndicator.Visible = Config.Draw_FOV
+end
+Library:SetWatermarkVisibility(true)
+Library:SetWatermark("tung ware mm2")
+Library:OnUnload(function()
+    Library.Unloaded = true
+end)
+local function getBox()
+    for _, box in ipairs(boxCache) do
+        if not box.Visible then
+            box.Visible = true
+            return box
+        end
+    end
+    
+    local box = Drawing.new("Square")
+    box.Thickness = 1
+    box.Filled = false
+    box.Visible = true
+    table.insert(boxCache, box)
+    return box
+end
+local function clearBoxes()
+    for _, box in ipairs(boxCache) do
+        box.Visible = false
+    end
+end
+local function removeHighlight(char)
+    local highlight = char:FindFirstChild("nrvm_Chams")
+    if highlight then highlight:Destroy() end
+end
+local function validPlayer(char, humanoid)
+    if not char or not char.Parent then return false end
+    if not humanoid or not humanoid.Parent then return false end
+    if humanoid.Health <= 0 then return false end
+    if humanoid:GetState() == Enum.HumanoidStateType.Dead then return false end
+    return true
+end
+local function getRole(player)
+    local char = player.Character
+    local pack = player:FindFirstChild("Backpack")
+    
+    if (char and char:FindFirstChild("Knife")) or (pack and pack:FindFirstChild("Knife")) then
+        return "Murderer"
+    elseif (char and char:FindFirstChild("Gun")) or (pack and pack:FindFirstChild("Gun")) then
+        return "Sheriff"
+    end
+    return "Innocent"
+end
+local function getThemeColor(role)
+    if not Config.RoleESP_Enabled then
+        return Color3.fromRGB(255, 255, 255)
+    end
+    if role == "Murderer" then
+        return Config.MurdererColor
+    elseif role == "Sheriff" then
+        return Config.SheriffColor
+    end
+    return Config.InnocentColor
+end
+local function getJoints(char)
+    local joints = {}
+    
+    for _, m in ipairs(char:GetDescendants()) do
+        if m:IsA("Motor6D") and m.Part0 and m.Part1 then
+            joints[m.Part0.Name] = m.Part0
+            joints[m.Part1.Name] = m.Part1
+        end
+    end
+    
+    local head = char:FindFirstChild("Head")
+    local upper = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local lower = char:FindFirstChild("LowerTorso")
+    local root = char:FindFirstChild("HumanoidRootPart")
+    
+    return {
+        Head = head or joints["Head"],
+        UpperTorso = upper or joints["UpperTorso"] or joints["Torso"],
+        LowerTorso = lower or joints["LowerTorso"],
+        HRP = root or joints["HumanoidRootPart"],
+        
+        LeftShoulder = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm"),
+        LeftElbow = char:FindFirstChild("LeftLowerArm"),
+        LeftHand = char:FindFirstChild("LeftHand"),
+        
+        RightShoulder = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm"),
+        RightElbow = char:FindFirstChild("RightLowerArm"),
+        RightHand = char:FindFirstChild("RightHand"),
+        
+        LeftHip = char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("Left Leg"),
+        LeftKnee = char:FindFirstChild("LeftLowerLeg"),
+        LeftFoot = char:FindFirstChild("LeftFoot"),
+        
+        RightHip = char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg"),
+        RightKnee = char:FindFirstChild("RightLowerLeg"),
+        RightFoot = char:FindFirstChild("RightFoot"),
+    }
+end
+local function getLine()
+    for _, line in ipairs(lineCache) do
+        if not line.Visible then
+            line.Visible = true
+            return line
+        end
+    end
+    
+    local line = Drawing.new("Line")
+    line.Thickness = 1.5
+    line.Transparency = 1
+    line.Visible = true
+    table.insert(lineCache, line)
+    return line
+end
+local function clearLines()
+    for _, line in ipairs(lineCache) do
+        line.Visible = false
+    end
+end
+local function renderBone(partA, partB, color)
+    if not partA or not partB or not partA.Parent or not partB.Parent or not Camera then return end
+    
+    local screenA, onScreenA = Camera:WorldToViewportPoint(partA.Position)
+    local screenB, onScreenB = Camera:WorldToViewportPoint(partB.Position)
+    
+    if onScreenA and onScreenB then
+        local line = getLine()
+        line.Color = color
+        line.From = Vector2.new(screenA.X, screenA.Y)
+        line.To = Vector2.new(screenB.X, screenB.Y)
+    end
+end
+local function renderSkeleton(joints, color)
+    renderBone(joints.Head, joints.UpperTorso, color)
+    renderBone(joints.UpperTorso, joints.LowerTorso, color)
+    
+    renderBone(joints.UpperTorso, joints.LeftShoulder, color)
+    renderBone(joints.LeftShoulder, joints.LeftElbow, color)
+    renderBone(joints.LeftElbow, joints.LeftHand, color)
+    
+    renderBone(joints.UpperTorso, joints.RightShoulder, color)
+    renderBone(joints.RightShoulder, joints.RightElbow, color)
+    renderBone(joints.RightElbow, joints.RightHand, color)
+    
+    renderBone(joints.LowerTorso, joints.LeftHip, color)
+    renderBone(joints.LeftHip, joints.LeftKnee, color)
+    renderBone(joints.LeftKnee, joints.LeftFoot, color)
+    
+    renderBone(joints.LowerTorso, joints.RightHip, color)
+    renderBone(joints.RightHip, joints.RightKnee, color)
+    renderBone(joints.RightKnee, joints.RightFoot, color)
+end
+task.spawn(function()
+    while true do
+        if Library.Unloaded then break end
+        
+        local targets = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local char = player.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                
+                if char and hum and validPlayer(char, hum) then
+                    local joints = getJoints(char)
+                    local root = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+                    
+                    if root then
+                        table.insert(targets, {
+                            Player = player,
+                            Character = char,
+                            Humanoid = hum,
+                            RootPart = root,
+                            Joints = joints,
+                            Role = getRole(player)
+                        })
+                    end
+                end
+            end
+        end
+        
+        targetList = targets
+        task.wait(0.25)
+    end
+end)
+local function getMurderer()
+    local mouse = UserInputService:GetMouseLocation()
+    local target = nil
+    local shortest = math.huge
+    
+    for i = 1, #targetList do
+        local current = targetList[i]
+        if current.Role == "Murderer" and current.Humanoid.Health > 0 then
+            local head = current.Joints.Head
+            if head then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mouse).Magnitude
+                    if dist < Config.Aimbot_FOV and dist < shortest then
+                        shortest = dist
+                        target = head
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+local weaponModule = require(game:GetService("ReplicatedStorage"):WaitForChild("ClientServices"):WaitForChild("WeaponService"))
+local baseGetMouseCFrame = weaponModule.GetMouseTargetCFrame
+weaponModule.GetMouseTargetCFrame = function(self, ...)
+    if not Library.Unloaded and Config.SilentAim_Enabled then
+        local target = getMurderer()
+        if target then
+            return CFrame.new(target.Position)
+        end
+    end
+    return baseGetMouseCFrame(self, ...)
+end
+local baseGetTargetPos = weaponModule.GetTargetPosition
+weaponModule.GetTargetPosition = function(self, x, y)
+    if not Library.Unloaded and Config.SilentAim_Enabled then
+        local target = getMurderer()
+        if target then
+            return CFrame.new(target.Position)
+        end
+    end
+    return baseGetTargetPos(self, x, y)
+end
+local function findGun()
+    for _, child in ipairs(Workspace:GetChildren()) do
+        if child.ClassName == "Model" and child.Name ~= "RegularLobby" and child.Name ~= "EffectLoader" and child.Name ~= "ServerStatus" and not Players:GetPlayerFromCharacter(child) then
+            local drop = child:FindFirstChild("GunDrop")
+            if drop then
+                return drop
+            end
+        end
+    end
+    return nil
+end
+local function renderGun(part)
+    if not gunVisuals.Box then
+        gunVisuals.Box = Drawing.new("Square")
+        gunVisuals.Box.Thickness = 1
+        gunVisuals.Box.Filled = false
+        
+        gunVisuals.Text = Drawing.new("Text")
+        gunVisuals.Text.Size = 13
+        gunVisuals.Text.Center = true
+        gunVisuals.Text.Outline = true
+        gunVisuals.Text.Font = 2
+    end
+    
+    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+    if onScreen then
+        local dist = (Camera.CFrame.Position - part.Position).Magnitude
+        local size = math.clamp(1000 / dist, 10, 40)
+        
+        gunVisuals.Box.Size = Vector2.new(size, size)
+        gunVisuals.Box.Position = Vector2.new(screenPos.X - size / 2, screenPos.Y - size / 2)
+        gunVisuals.Box.Color = Config.GunColor
+        gunVisuals.Box.Visible = true
+        
+        gunVisuals.Text.Text = string.format("DROPPED GUN\n[%d Studs]", math.round(dist))
+        gunVisuals.Text.Position = Vector2.new(screenPos.X, screenPos.Y - size / 2 - 25)
+        gunVisuals.Text.Color = Config.GunColor
+        gunVisuals.Text.Visible = true
+    else
+        gunVisuals.Box.Visible = false
+        gunVisuals.Text.Visible = false
+    end
+end
+local function clearGun()
+    if gunVisuals.Box then gunVisuals.Box.Visible = false end
+    if gunVisuals.Text then gunVisuals.Text.Visible = false end
+end
+local loopConnection
+loopConnection = RunService.RenderStepped:Connect(function()
+    if Library.Unloaded then
+        if loopConnection then loopConnection:Disconnect() end
+        clearLines()
+        clearBoxes()
+        clearGun()
+        if gunVisuals.Box then gunVisuals.Box:Remove() end
+        if gunVisuals.Text then gunVisuals.Text:Remove() end
+        if fovIndicator then fovIndicator:Remove() end
+        return
+    end
+    
+    if not Camera then return end
+    local camPos = Camera.CFrame.Position
+    
+    clearLines()
+    clearBoxes()
+    
+    if fovIndicator then
+        fovIndicator.Position = UserInputService:GetMouseLocation()
+        fovIndicator.Radius = Config.Aimbot_FOV
+        fovIndicator.Visible = Config.Draw_FOV
+        fovIndicator.Color = Config.FOVColor
+    end
+    
+    local dropped = findGun()
+    if Config.GunWatcher_Enabled and dropped and dropped:IsA("BasePart") then
+        renderGun(dropped)
+    else
+        clearGun()
+    end
+    
+    for _, descendant in ipairs(Workspace:GetDescendants()) do
+        if descendant:IsA("Highlight") and descendant.Name == "nrvm_Chams" then
+            local char = descendant.Parent
+            local keep = false
+            if char and char.Parent then
+                for j = 1, #targetList do
+                    local t = targetList[j]
+                    if t.Character == char and validPlayer(t.Character, t.Humanoid) then
+                        keep = true
+                        break
+                    end
+                end
+            end
+            if not keep then
+                descendant:Destroy()
+            end
+        end
+    end
+    
+    for i = 1, #targetList do
+        local target = targetList[i]
+        local char = target.Character
+        local hum = target.Humanoid
+        local root = target.RootPart
+        local color = getThemeColor(target.Role)
+        
+        if validPlayer(char, hum) then
+            local dist = (camPos - root.Position).Magnitude
+            if dist <= Config.Max_Distance then
+                
+                if Config.Skeleton_Enabled then
+                    renderSkeleton(target.Joints, color)
+                end
+                
+                if Config.Box_Enabled then
+                    local head = target.Joints.Head
+                    local hrp = target.Joints.HRP
+                    if head and hrp then
+                        local headPos, headScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.8, 0))
+                        local legPos, legScreen = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
+                        
+                        if headScreen and legScreen then
+                            local height = math.abs(headPos.Y - legPos.Y)
+                            local width = height / 1.6
+                            local box = getBox()
+                            box.Size = Vector2.new(width, height)
+                            box.Position = Vector2.new(headPos.X - width / 2, headPos.Y)
+                            box.Color = color
+                        end
+                    end
+                end
+                
+                if Config.Chams_Enabled then
+                    local highlight = char:FindFirstChild("nrvm_Chams")
+                    if not highlight then
+                        highlight = Instance.new("Highlight")
+                        highlight.Name = "nrvm_Chams"
+                        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        highlight.Parent = char
+                    end
+                    highlight.FillColor = color
+                    highlight.OutlineColor = color
+                    highlight.FillTransparency = 0.5
+                    highlight.OutlineTransparency = 0.2
+                else
+                    removeHighlight(char)
+                end
+            else
+                removeHighlight(char)
+            end
+        else
+            if char then
+                removeHighlight(char)
+            end
+        end
+    end
+end)
